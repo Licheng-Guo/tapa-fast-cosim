@@ -139,6 +139,7 @@ def get_s_axi_control():
   // in this way we don't need to worry about flow control
   reg [63:0] s_axi_aw_din;
   reg        s_axi_aw_write;
+  wire       s_axi_aw_full_n;
 
   fifo_srl #(
     .DATA_WIDTH(64),
@@ -149,7 +150,7 @@ def get_s_axi_control():
     .reset(~ap_rst_n),
 
     // write
-    .if_full_n   (),
+    .if_full_n   (s_axi_aw_full_n),
     .if_write    (s_axi_aw_write),
     .if_din      (s_axi_aw_din  ),
 
@@ -165,6 +166,7 @@ def get_s_axi_control():
 
   reg [511:0] s_axi_w_din;
   reg         s_axi_w_write;
+  wire        s_axi_w_full_n;
 
   fifo_srl #(
     .DATA_WIDTH(32),
@@ -175,7 +177,7 @@ def get_s_axi_control():
     .reset(~ap_rst_n),
 
     // write
-    .if_full_n   (),
+    .if_full_n   (s_axi_w_full_n),
     .if_write    (s_axi_w_write),
     .if_din      (s_axi_w_din  ),
 
@@ -304,16 +306,21 @@ def get_test_signals(
 
   for arg, addrs in arg_to_reg_addrs.items():
     val = scalar_arg_to_val.get(arg, 0)
-    test += f'    s_axi_aw_write = 1; s_axi_aw_din = {addrs[0]}; s_axi_w_write = 1; s_axi_w_din = {val} & REG_MASK_32_BIT; #CLOCK_PERIOD;\n'
+    test += f'    while(!(s_axi_aw_full_n & s_axi_w_full_n)) begin @(negedge ap_clk) s_axi_aw_write = 0; s_axi_w_write = 0; end\n'
+    test += f'    @(negedge ap_clk) s_axi_aw_write = 1; s_axi_aw_din = {addrs[0]}; s_axi_w_write = 1; s_axi_w_din = {val} & REG_MASK_32_BIT;\n'
+    test += f'    @(negedge ap_clk) s_axi_aw_write = 0; s_axi_w_write = 0;\n'
     if len(addrs) == 2:
-      test += f'    s_axi_aw_write = 1; s_axi_aw_din = {addrs[1]}; s_axi_w_write = 1; s_axi_w_din = ({val} >> 32) & REG_MASK_32_BIT; #CLOCK_PERIOD;\n'
+      test += f'    while(!(s_axi_aw_full_n & s_axi_w_full_n)) begin @(negedge ap_clk) s_axi_aw_write = 0; s_axi_w_write = 0; end\n'
+      test += f'    @(negedge ap_clk) s_axi_aw_write = 1; s_axi_aw_din = {addrs[1]}; s_axi_w_write = 1; s_axi_w_din = ({val} >> 32) & REG_MASK_32_BIT;\n'
+      test += f'    @(negedge ap_clk) s_axi_aw_write = 0; s_axi_w_write = 0;\n'
 
   test += f'''
     // start the kernel
-    s_axi_aw_write = 1; s_axi_aw_din = 'h00; s_axi_w_write = 1; s_axi_w_din = 1; #CLOCK_PERIOD;
+    while(!(s_axi_aw_full_n & s_axi_w_full_n)) begin @(negedge ap_clk) s_axi_aw_write = 0; s_axi_w_write = 0; end
+    @(negedge ap_clk) s_axi_aw_write = 1; s_axi_aw_din = 'h00; s_axi_w_write = 1; s_axi_w_din = 1;
 
     // stop writing control signal
-    s_axi_aw_write = 0; s_axi_w_write = 0; #CLOCK_PERIOD;
+    @(negedge ap_clk) s_axi_aw_write = 0; s_axi_w_write = 0;
 
     // start polling ap_done
     #(CLOCK_PERIOD*1000);
